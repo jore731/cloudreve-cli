@@ -112,3 +112,54 @@ class TestAuth:
             c.get("/api/v4/test")
         req = httpx_mock.get_requests()[0]
         assert "authorization" not in req.headers
+
+
+class TestEnvelopeAuthErrors:
+    """Envelope-level auth codes (HTTP 200 but code 401/403) must raise AuthError
+    so auto-refresh can intercept them."""
+
+    def test_envelope_401_raises_auth_error(self, httpx_mock):
+        httpx_mock.add_response(json=_envelope(None, code=401, msg="Login required"))
+        with (
+            CloudreveClient(server="https://example.com") as c,
+            pytest.raises(AuthError, match="Login required"),
+        ):
+            c.get("/api/v4/test")
+
+    def test_envelope_403_raises_auth_error(self, httpx_mock):
+        httpx_mock.add_response(json=_envelope(None, code=403, msg="Forbidden"))
+        with (
+            CloudreveClient(server="https://example.com") as c,
+            pytest.raises(AuthError, match="Forbidden"),
+        ):
+            c.get("/api/v4/test")
+
+    def test_envelope_401_triggers_auto_refresh(self, httpx_mock):
+        """When the API returns envelope code 401, auto-refresh should retry."""
+        # First call: envelope 401
+        httpx_mock.add_response(json=_envelope(None, code=401, msg="Login required"))
+        # Refresh call: success
+        httpx_mock.add_response(
+            json=_envelope({"access_token": "new-at", "refresh_token": "new-rt"})
+        )
+        # Retry: success
+        httpx_mock.add_response(json=_envelope({"files": []}))
+
+        refreshed = {}
+
+        def on_refresh(at: str, rt: str) -> None:
+            refreshed["at"] = at
+            refreshed["rt"] = rt
+
+        with CloudreveClient(
+            server="https://example.com",
+            token="old-at",
+            refresh_token="old-rt",
+            on_token_refresh=on_refresh,
+        ) as c:
+            result = c.get("/api/v4/file")
+
+        assert result == {"files": []}
+        assert refreshed == {"at": "new-at", "rt": "new-rt"}
+        # 3 requests: original + refresh + retry
+        assert len(httpx_mock.get_requests()) == 3

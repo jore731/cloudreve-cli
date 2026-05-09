@@ -207,6 +207,10 @@ class CloudreveClient:
         code = body.get("code", -1)
         if code != 0:
             msg = body.get("msg") or body.get("error") or f"API error (code={code})"
+            # Envelope auth errors (401/403) must raise AuthError so the
+            # auto-refresh logic in request() can intercept them.
+            if code in (401, 403):
+                raise AuthError(str(msg))
             raise APIError(
                 str(msg),
                 code=code,
