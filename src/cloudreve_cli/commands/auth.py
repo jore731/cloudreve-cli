@@ -68,7 +68,7 @@ def login(
         with CloudreveClient(server=server) as client:
             body = client.post(
                 "/api/v4/session/token/2fa",
-                json={"opt": twofa_code, "session_id": session_id},
+                json={"otp": twofa_code, "session_id": session_id},
                 raw=True,
             )
             code = body.get("code", -1)

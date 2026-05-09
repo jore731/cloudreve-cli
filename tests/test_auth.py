@@ -206,6 +206,12 @@ class TestAuthLogin2FA:
         assert result.exit_code == 0, _all_output(result)
         assert "Logged in as Test" in _all_output(result)
 
+        # Verify the 2FA request used the correct key "otp" (not "opt")
+        twofa_request = httpx_mock.get_requests()[-1]
+        body = json.loads(twofa_request.content)
+        assert body["otp"] == "123456"
+        assert "opt" not in body
+
     def test_2fa_noninteractive_exit_code_2(self, runner, httpx_mock, monkeypatch):
         """Exit code 2 when 2FA required in non-interactive mode without --2fa-code."""
         httpx_mock.add_response(
