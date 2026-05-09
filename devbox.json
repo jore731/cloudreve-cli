@@ -3,5 +3,8 @@
   "packages": [
     "uv@latest",
     "pre-commit@latest"
-  ]
+  ],
+  "env": {
+    "PATH": "$PATH:$PWD/.venv/bin"
+  }
 }
