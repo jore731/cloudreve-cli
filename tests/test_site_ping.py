@@ -39,8 +39,8 @@ class TestSitePing:
             ["--server", "https://example.com", "--output", "table", "site", "ping"],
         )
         assert result.exit_code == 0
-        # Table output goes to stderr
-        assert "version" in result.stderr or "4.0.0" in result.stderr
+        # Table output goes to stderr, mixed into result.output by CliRunner
+        assert "version" in result.output or "4.0.0" in result.output
 
     def test_ping_with_env_var(self, httpx_mock, monkeypatch):
         httpx_mock.add_response(json=PING_RESPONSE)
@@ -72,8 +72,9 @@ class TestSitePing:
             ],
         )
         assert result.exit_code == 0
-        assert "GET" in result.stderr
-        assert "200" in result.stderr
+        # Verbose logs go to stderr, mixed into result.output by CliRunner
+        assert "GET" in result.output
+        assert "200" in result.output
 
     def test_ping_auth_error(self, httpx_mock, _clean_env):
         httpx_mock.add_response(
