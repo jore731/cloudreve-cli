@@ -150,4 +150,5 @@ def main() -> None:
 
 # Register command groups
 from cloudreve_cli.commands import auth as _auth  # noqa: E402, F401
+from cloudreve_cli.commands import files as _files  # noqa: E402, F401
 from cloudreve_cli.commands import site as _site  # noqa: E402, F401

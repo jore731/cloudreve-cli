@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class TokenPair(BaseModel):
@@ -59,3 +59,60 @@ class PrepareLoginData(BaseModel):
     sso_enabled: bool = False
     password_enabled: bool = True
     qq_enabled: bool = False
+
+
+# ---------------------------------------------------------------------------
+# File listing models
+# ---------------------------------------------------------------------------
+
+
+class FileObject(BaseModel):
+    """Single file or folder from a listing response."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    type: int  # 0 = file, 1 = folder
+    id: str
+    name: str
+    size: int = 0
+    created_at: str | None = None
+    updated_at: str | None = None
+    path: str | None = None
+    metadata: dict[str, str] | None = None
+    capability: str | None = None
+    owned: bool | None = None
+    primary_entity: str | None = None
+    permission: str | None = None
+
+
+class Pagination(BaseModel):
+    """Pagination info from listing response."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    page: int = 0
+    page_size: int = 50
+    is_cursor: bool = False
+    next_page_token: str | None = None
+
+
+class ListingProps(BaseModel):
+    """Listing metadata (capabilities, sort options)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    capability: str | None = None
+    max_page_size: int = 2000
+    order_by_options: list[str] | None = None
+    order_direction_options: list[str] | None = None
+
+
+class FileListData(BaseModel):
+    """Top-level data from ``GET /api/v4/file`` response."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    files: list[FileObject] = []
+    parent: FileObject | None = None
+    pagination: Pagination | None = None
+    props: ListingProps | None = None
