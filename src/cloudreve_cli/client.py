@@ -3,6 +3,7 @@
 Handles:
 - Bearer token auth
 - API response envelope parsing ({code, data, msg, error, correlation_id})
+- Automatic token refresh on 401 (if refresh_token is available)
 - Retries with exponential backoff on 5xx / connection errors
 - Verbose logging to stderr
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -30,9 +32,11 @@ class CloudreveClient:
         *,
         server: str,
         token: str | None = None,
+        refresh_token: str | None = None,
         retries: int = 0,
         verbose: bool = False,
         timeout: float = 30.0,
+        on_token_refresh: Callable[[str, str], None] | None = None,
     ):
         base_url = server.rstrip("/")
         headers: dict[str, str] = {}
@@ -46,6 +50,9 @@ class CloudreveClient:
         )
         self._retries = retries
         self._verbose = verbose
+        self._refresh_token = refresh_token
+        self._on_token_refresh = on_token_refresh
+        self._refreshing = False
 
     def close(self) -> None:
         self._http.close()
@@ -59,6 +66,31 @@ class CloudreveClient:
     # --- public API ---
 
     def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+        data: Any | None = None,
+        headers: dict[str, str] | None = None,
+        raw: bool = False,
+    ) -> Any:
+        """Make an API request with automatic token refresh on 401."""
+        try:
+            return self._do_request(
+                method, path, params=params, json=json, data=data, headers=headers, raw=raw
+            )
+        except AuthError:
+            if self._refreshing or not self._refresh_token:
+                raise
+            # Try auto-refresh and retry once
+            self._do_auto_refresh()
+            return self._do_request(
+                method, path, params=params, json=json, data=data, headers=headers, raw=raw
+            )
+
+    def _do_request(
         self,
         method: str,
         path: str,
@@ -138,6 +170,34 @@ class CloudreveClient:
         return self.request("DELETE", path, **kwargs)
 
     # --- internal ---
+
+    def _do_auto_refresh(self) -> None:
+        """Attempt to refresh the access token using the refresh token."""
+        self._refreshing = True
+        try:
+            resp = self._http.post(
+                "/api/v4/session/token/refresh",
+                json={"refresh_token": self._refresh_token},
+            )
+            if resp.status_code != 200:
+                raise AuthError("Token refresh failed — please log in again.")
+
+            body = resp.json()
+            if body.get("code", -1) != 0:
+                raise AuthError("Token refresh failed — please log in again.")
+
+            data = body["data"]
+            new_access = data["access_token"]
+            new_refresh = data["refresh_token"]
+
+            # Update client state
+            self._http.headers["Authorization"] = f"Bearer {new_access}"
+            self._refresh_token = new_refresh
+
+            if self._on_token_refresh:
+                self._on_token_refresh(new_access, new_refresh)
+        finally:
+            self._refreshing = False
 
     @staticmethod
     def _parse_envelope(resp: httpx.Response) -> Any:

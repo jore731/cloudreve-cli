@@ -26,6 +26,7 @@ class ResolvedConfig:
 
     server: str | None = None
     token: str | None = None
+    refresh_token: str | None = None
     source: str = "none"  # "cli", "env", "profile", "none"
     profile: str | None = None
     extra: dict[str, str] = field(default_factory=dict)
@@ -56,12 +57,15 @@ def resolve_config(
             source="env",
         )
 
-    # 3. TOML config file with named profiles (stub — full implementation in auth slice #3)
+    # 3. TOML config file with named profiles
     if CONFIG_FILE.exists():
         import tomllib
 
-        with CONFIG_FILE.open("rb") as f:
-            data = tomllib.load(f)
+        try:
+            with CONFIG_FILE.open("rb") as f:
+                data = tomllib.load(f)
+        except Exception:
+            return ResolvedConfig()
 
         name = profile_name or data.get("default_profile", "default")
         profiles = data.get("profiles", {})
@@ -69,9 +73,91 @@ def resolve_config(
         if prof:
             return ResolvedConfig(
                 server=prof.get("server"),
-                token=prof.get("token"),
+                token=prof.get("access_token"),
+                refresh_token=prof.get("refresh_token"),
                 source="profile",
                 profile=name,
             )
 
     return ResolvedConfig()
+
+
+def save_profile(
+    name: str,
+    *,
+    server: str,
+    access_token: str,
+    refresh_token: str,
+) -> None:
+    """Save a profile to the TOML config file."""
+    import tomli_w
+
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    data: dict = {}
+    if CONFIG_FILE.exists():
+        import tomllib
+
+        with CONFIG_FILE.open("rb") as f:
+            data = tomllib.load(f)
+
+    profiles = data.setdefault("profiles", {})
+    profiles[name] = {
+        "server": server,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
+
+    # Set default_profile on first login only
+    if "default_profile" not in data:
+        data["default_profile"] = name
+
+    with CONFIG_FILE.open("wb") as f:
+        tomli_w.dump(data, f)
+
+
+def delete_profile(name: str) -> bool:
+    """Remove a profile from the TOML config file. Returns True if found."""
+    if not CONFIG_FILE.exists():
+        return False
+
+    import tomllib
+
+    import tomli_w
+
+    with CONFIG_FILE.open("rb") as f:
+        data = tomllib.load(f)
+
+    profiles = data.get("profiles", {})
+    if name not in profiles:
+        return False
+
+    del profiles[name]
+
+    # If we deleted the default profile, pick the next one (or clear)
+    if data.get("default_profile") == name:
+        if profiles:
+            data["default_profile"] = next(iter(profiles))
+        else:
+            data.pop("default_profile", None)
+
+    with CONFIG_FILE.open("wb") as f:
+        tomli_w.dump(data, f)
+
+    return True
+
+
+def list_profiles() -> list[str]:
+    """List all profile names from the config file."""
+    if not CONFIG_FILE.exists():
+        return []
+
+    import tomllib
+
+    try:
+        with CONFIG_FILE.open("rb") as f:
+            data = tomllib.load(f)
+    except Exception:
+        return []
+
+    return list(data.get("profiles", {}).keys())

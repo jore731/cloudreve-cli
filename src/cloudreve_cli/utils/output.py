@@ -6,7 +6,6 @@ Supports --output table|json and --quiet mode.
 from __future__ import annotations
 
 import json
-import sys
 from typing import Any
 
 from rich.console import Console
@@ -58,4 +57,6 @@ def render_kv(data: dict[str, Any], *, title: str | None = None) -> None:
 def echo(message: str, *, quiet: bool = False) -> None:
     """Print a message to stderr unless --quiet is active."""
     if not quiet:
-        print(message, file=sys.stderr)
+        import click
+
+        click.echo(message, err=True)

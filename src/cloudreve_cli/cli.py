@@ -49,6 +49,7 @@ class GlobalState:
         )
         self.server = cfg.server
         self.token = cfg.token
+        self.refresh_token = cfg.refresh_token
         self.config_source = cfg.source
         self.profile = cfg.profile
 
@@ -62,13 +63,27 @@ class GlobalState:
             )
         return self.server
 
+    def _handle_token_refresh(self, new_access: str, new_refresh: str) -> None:
+        """Persist refreshed tokens back to config profile."""
+        if self.config_source == "profile" and self.profile:
+            from cloudreve_cli.config import save_profile
+
+            save_profile(
+                self.profile,
+                server=self.server or "",
+                access_token=new_access,
+                refresh_token=new_refresh,
+            )
+
     def make_client(self) -> CloudreveClient:
         """Build a CloudreveClient from resolved config."""
         return CloudreveClient(
             server=self.require_server(),
             token=self.token,
+            refresh_token=self.refresh_token,
             retries=self.retries,
             verbose=self.verbose,
+            on_token_refresh=self._handle_token_refresh,
         )
 
 
@@ -76,8 +91,8 @@ pass_state = click.make_pass_decorator(GlobalState)
 
 
 @click.group(cls=CloudreveGroup)
-@click.option("--server", envvar="CLOUDREVE_SERVER", default=None, help="Cloudreve server URL.")
-@click.option("--token", envvar="CLOUDREVE_TOKEN", default=None, help="Bearer token for auth.")
+@click.option("--server", default=None, help="Cloudreve server URL.")
+@click.option("--token", default=None, help="Bearer token for auth.")
 @click.option("--profile", "-p", default=None, help="Named config profile to use.")
 @click.option(
     "--output",
@@ -134,4 +149,5 @@ def main() -> None:
 
 
 # Register command groups
+from cloudreve_cli.commands import auth as _auth  # noqa: E402, F401
 from cloudreve_cli.commands import site as _site  # noqa: E402, F401
