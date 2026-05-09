@@ -147,3 +147,81 @@ Ruff config: line-length 99, target py312, rules: E, F, I, UP, B, SIM, RUF.
 - Always commit via `devbox run "git commit -m '...'"` 
 - Close issues with `Closes #N` in commit messages
 - GitHub account: `jore731` (switch with `gh auth switch --user jore731`)
+
+## Contribution Guidelines
+
+### Setup
+
+```sh
+# 1. Install devbox (https://www.jetify.com/devbox/docs/installing_devbox/)
+curl -fsSL https://get.jetify.com/devbox | bash
+
+# 2. Clone and install
+git clone https://github.com/jore731/cloudreve-cli.git
+cd cloudreve-cli
+devbox install
+devbox run "uv sync"
+
+# 3. Install pre-commit hooks
+devbox run "pre-commit install"
+
+# 4. Verify everything works
+devbox run "uv run pytest"
+devbox run "uv run ruff check src/ tests/"
+```
+
+### Development Workflow
+
+1. **Pick an issue** — implementation issues #3–#18 have acceptance criteria and dependency info
+2. **Create a branch** — `git checkout -b <issue-number>-short-description`
+3. **Write tests first** — use pytest-httpx to mock API responses; see `tests/` for examples
+4. **Implement** — follow the patterns in existing command groups (see `commands/site.py`)
+5. **Lint and test** before committing:
+   ```sh
+   devbox run "uv run ruff check src/ tests/ --fix"
+   devbox run "uv run ruff format src/ tests/"
+   devbox run "uv run pytest"
+   ```
+6. **Commit** — always through devbox: `devbox run "git commit -m '...'"`
+7. **Reference the issue** — include `Closes #N` in the commit message or PR description
+
+### Code Style
+
+- **Ruff** handles all linting and formatting — no other tools needed
+- Line length: 99 characters
+- Target: Python 3.12+
+- Use `from __future__ import annotations` in every module for modern type syntax
+- Minimal comments — only where clarification is genuinely needed
+- Docstrings on modules and public functions
+
+### Adding Dependencies
+
+- **Runtime deps**: Add to `[project.dependencies]` in `pyproject.toml`, then `devbox run "uv sync"`
+- **Dev deps**: Add to `[dependency-groups] dev` in `pyproject.toml`, then `devbox run "uv sync"`
+- **CLI tools**: Add to `devbox.json`, then `devbox install`
+- Keep dependencies minimal — prefer stdlib where reasonable
+
+### Testing Conventions
+
+- One test file per command group: `tests/test_<group>.py`
+- Shared fixtures in `tests/conftest.py`
+- Mock HTTP with `pytest-httpx` — never make real network calls
+- Test both `--output table` and `--output json` paths
+- Test error cases (auth errors, not found, server errors)
+- Use `CliRunner` from Click — **do NOT pass `mix_stderr=False`** (removed in Click 8.2+)
+- Aim for high coverage on new commands; every acceptance criterion should have a test
+
+### Issue Dependencies
+
+Issues are organized as vertical slices with dependencies:
+
+```
+#2 (Scaffold) ✅
+├── #8 (Auth) → #6 (URI+ls) → #12 (Download), #13 (Upload Local), #9 (File CRUD)
+├── #4 (Share)                  #13 → #16 (S3 Upload)
+├── #3 (Workflow ls) → #10 (Archive), #11 (Relocate)
+├── #5 (WebDAV/VAS/Group)       #9 → #18 (Move/Copy/Delete), #14 (Content),
+└── #7 (User/Site)                   #15 (Pins/Versions), #17 (Thumbs/Events)
+```
+
+Check the "Blocked by" section of each issue before starting work.
