@@ -152,3 +152,4 @@ def main() -> None:
 from cloudreve_cli.commands import auth as _auth  # noqa: E402, F401
 from cloudreve_cli.commands import files as _files  # noqa: E402, F401
 from cloudreve_cli.commands import site as _site  # noqa: E402, F401
+from cloudreve_cli.commands import workflow as _workflow  # noqa: E402, F401

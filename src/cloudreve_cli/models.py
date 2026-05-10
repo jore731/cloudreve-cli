@@ -116,3 +116,50 @@ class FileListData(BaseModel):
     parent: FileObject | None = None
     pagination: Pagination | None = None
     props: ListingProps | None = None
+
+
+# ---------------------------------------------------------------------------
+# Workflow models
+# ---------------------------------------------------------------------------
+
+
+class WorkflowTaskSummary(BaseModel):
+    """Phase / progress summary embedded in a workflow task."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    phase: str | None = None
+    props: dict[str, str | int | float | bool | None] | None = None
+
+
+class WorkflowTask(BaseModel):
+    """Single workflow task from ``GET /api/v4/workflow``."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    status: str  # queued, completed, error, …
+    type: str  # relocate, create_archive, extract_archive, …
+    summary: WorkflowTaskSummary | None = None
+    duration: int = 0
+    resume_time: str | None = None
+    error: str | None = None
+    node: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class WorkflowListData(BaseModel):
+    """Top-level data from ``GET /api/v4/workflow``."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    tasks: list[WorkflowTask] = []
+    pagination: Pagination | None = None
+
+
+class ProgressEntry(BaseModel):
+    """Single progress counter (e.g. upload_count, upload)."""
+
+    total: int = 0
+    current: int = 0
