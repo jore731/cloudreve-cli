@@ -2,8 +2,8 @@
 
 Resolution order:
 1. CLI flags (--server, --token) — highest priority
-2. Environment variables (CLOUDREVE_SERVER, CLOUDREVE_TOKEN) — if ANY env var is set,
-   the config file is completely ignored
+2. Environment variables (CLOUDREVE_SERVER + CLOUDREVE_TOKEN) — both must be set
+   to activate env-based auth; setting only one is ignored
 3. TOML config file (~/.config/cloudreve-cli/config.toml) with named profiles
 """
 
@@ -47,10 +47,10 @@ def resolve_config(
             source="cli",
         )
 
-    # 2. If ANY env var is set, config file is completely ignored
+    # 2. Both env vars must be set to activate env-based auth
     env_server = os.environ.get(ENV_SERVER)
     env_token = os.environ.get(ENV_TOKEN)
-    if env_server or env_token:
+    if env_server and env_token:
         return ResolvedConfig(
             server=env_server,
             token=env_token,

@@ -42,16 +42,17 @@ class TestSitePing:
         # Table output goes to stderr, mixed into result.output by CliRunner
         assert "version" in result.output or "4.0.0" in result.output
 
-    def test_ping_with_env_var(self, httpx_mock, monkeypatch):
+    def test_ping_with_env_var(self, httpx_mock, monkeypatch, _clean_env, _mock_config_dir):
         httpx_mock.add_response(json=PING_RESPONSE)
         monkeypatch.setenv("CLOUDREVE_SERVER", "https://env.example.com")
+        monkeypatch.setenv("CLOUDREVE_TOKEN", "dummy-tok")
         runner = CliRunner()
         result = runner.invoke(cli, ["--output", "json", "site", "ping"])
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert parsed["version"] == "4.0.0"
 
-    def test_ping_no_server_fails(self, _clean_env):
+    def test_ping_no_server_fails(self, _clean_env, _mock_config_dir):
         runner = CliRunner()
         result = runner.invoke(cli, ["site", "ping"])
         assert result.exit_code != 0
