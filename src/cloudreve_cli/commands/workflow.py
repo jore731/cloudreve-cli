@@ -257,18 +257,44 @@ def _wait_for_task(
 
 
 @workflow.command()
-@click.argument("files", nargs=-1, required=True)
+@click.argument("files", nargs=-1, required=False)
 @click.option("--policy", required=True, help="Destination storage policy ID.")
 @click.option("--wait", "wait_flag", is_flag=True, help="Poll until task completes.")
+@click.option(
+    "--stdin",
+    "stdin_flag",
+    is_flag=True,
+    help="Read file URIs from stdin (one per line), for piping.",
+)
 @pass_state
-def relocate(state: GlobalState, files: tuple[str, ...], policy: str, wait_flag: bool) -> None:
+def relocate(
+    state: GlobalState,
+    files: tuple[str, ...],
+    policy: str,
+    wait_flag: bool,
+    stdin_flag: bool,
+) -> None:
     """Relocate files to a different storage policy.
 
     FILES are one or more cloudreve:// URIs (or bare paths like /photos).
+    Use --stdin to read URIs from stdin (one per line).
     """
+    import sys
+
     from cloudreve_cli.utils.uri import parse_uri
 
-    src_uris = [parse_uri(f).to_uri() for f in files]
+    all_files: list[str] = list(files)
+
+    if stdin_flag:
+        for line in sys.stdin:
+            stripped = line.strip()
+            if stripped:
+                all_files.append(stripped)
+
+    if not all_files:
+        raise click.UsageError("No files specified. Provide FILES arguments or use --stdin.")
+
+    src_uris = [parse_uri(f).to_uri() for f in all_files]
     payload: dict[str, Any] = {"src": src_uris, "dst_policy_id": policy}
 
     client = state.make_client()

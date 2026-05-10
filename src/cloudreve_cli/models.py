@@ -107,6 +107,17 @@ class ListingProps(BaseModel):
     order_direction_options: list[str] | None = None
 
 
+class StoragePolicy(BaseModel):
+    """Storage policy available to the user (Pro feature)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str
+    type: str
+    max_size: int = 0
+
+
 class FileListData(BaseModel):
     """Top-level data from ``GET /api/v4/file`` response."""
 
@@ -116,6 +127,7 @@ class FileListData(BaseModel):
     parent: FileObject | None = None
     pagination: Pagination | None = None
     props: ListingProps | None = None
+    storage_policy: StoragePolicy | None = None
 
 
 # ---------------------------------------------------------------------------

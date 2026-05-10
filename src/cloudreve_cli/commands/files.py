@@ -202,6 +202,12 @@ def _ls_recursive(
     help="Reverse sort order.",
 )
 @click.option(
+    "--uri",
+    "uri_mode",
+    is_flag=True,
+    help="Output cloudreve:// URIs to stdout (one per line), for piping.",
+)
+@click.option(
     "--page",
     "page_num",
     type=int,
@@ -221,6 +227,7 @@ def ls(
     path: str,
     short: bool,
     recursive: bool,
+    uri_mode: bool,
     sort_key: str,
     reverse: bool,
     page_num: int | None,
@@ -248,7 +255,10 @@ def ls(
                 order_by=api_order_by,
                 order_direction=api_direction,
             )
-            _render_recursive(state, file_depth_pairs, short=short)
+            if uri_mode:
+                _render_uris([(f, d) for f, d in file_depth_pairs])
+            else:
+                _render_recursive(state, file_depth_pairs, short=short)
             return
 
         if page_num is not None:
@@ -275,7 +285,17 @@ def ls(
         # Client-side sort (on top of server sort)
         files = _sort_files(files, sort_key, reverse)
 
-        _render_files(state, files, short=short)
+        if uri_mode:
+            _render_uris([(f, 0) for f in files])
+        else:
+            _render_files(state, files, short=short)
+
+
+def _render_uris(file_depth_pairs: list[tuple[FileObject, int]]) -> None:
+    """Output cloudreve:// URIs to stdout, one per line."""
+    for f, _depth in file_depth_pairs:
+        if f.path:
+            click.echo(f.path)
 
 
 def _render_files(state: GlobalState, files: list[FileObject], *, short: bool) -> None:

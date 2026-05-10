@@ -71,9 +71,9 @@ def _progress_response(data: dict) -> dict:
     return {**_ENVELOPE, "data": data}
 
 
-def _invoke(*args: str) -> ...:
+def _invoke(*args: str, input: str | None = None) -> ...:
     runner = CliRunner()
-    return runner.invoke(cli, ["--server", "https://example.com", *args])
+    return runner.invoke(cli, ["--server", "https://example.com", *args], input=input)
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +275,84 @@ class TestWorkflowRelocate:
         result = _invoke("workflow", "relocate", "/file.txt")
         assert result.exit_code != 0
         assert "policy" in result.output.lower() or "required" in result.output.lower()
+
+    def test_relocate_no_files_error(self, _clean_env):
+        result = _invoke("workflow", "relocate", "--policy", "P1")
+        assert result.exit_code != 0
+        assert "no files" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# workflow relocate --stdin
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowRelocateStdin:
+    def test_relocate_stdin(self, httpx_mock, _clean_env):
+        httpx_mock.add_response(json=_task_response(TASK_A))
+        stdin_data = "cloudreve://my/file1.txt\ncloudreve://my/file2.txt\n"
+        result = _invoke(
+            "--output",
+            "json",
+            "workflow",
+            "relocate",
+            "--policy",
+            "P1",
+            "--stdin",
+            input=stdin_data,
+        )
+        assert result.exit_code == 0
+        req = httpx_mock.get_request()
+        body = json.loads(req.content)
+        assert len(body["src"]) == 2
+        assert body["src"][0] == "cloudreve://my/file1.txt"
+        assert body["src"][1] == "cloudreve://my/file2.txt"
+        assert body["dst_policy_id"] == "P1"
+
+    def test_relocate_stdin_with_args(self, httpx_mock, _clean_env):
+        """--stdin combines with positional arguments."""
+        httpx_mock.add_response(json=_task_response(TASK_A))
+        stdin_data = "cloudreve://my/stdin-file.txt\n"
+        result = _invoke(
+            "--output",
+            "json",
+            "workflow",
+            "relocate",
+            "/arg-file.txt",
+            "--policy",
+            "P1",
+            "--stdin",
+            input=stdin_data,
+        )
+        assert result.exit_code == 0
+        req = httpx_mock.get_request()
+        body = json.loads(req.content)
+        assert len(body["src"]) == 2
+        assert body["src"][0] == "cloudreve://my/arg-file.txt"
+        assert body["src"][1] == "cloudreve://my/stdin-file.txt"
+
+    def test_relocate_stdin_empty_lines_skipped(self, httpx_mock, _clean_env):
+        httpx_mock.add_response(json=_task_response(TASK_A))
+        stdin_data = "\n\ncloudreve://my/file.txt\n\n"
+        result = _invoke(
+            "--output",
+            "json",
+            "workflow",
+            "relocate",
+            "--policy",
+            "P1",
+            "--stdin",
+            input=stdin_data,
+        )
+        assert result.exit_code == 0
+        req = httpx_mock.get_request()
+        body = json.loads(req.content)
+        assert len(body["src"]) == 1
+
+    def test_relocate_stdin_empty_error(self, _clean_env):
+        result = _invoke("workflow", "relocate", "--policy", "P1", "--stdin", input="")
+        assert result.exit_code != 0
+        assert "no files" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------

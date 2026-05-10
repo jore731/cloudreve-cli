@@ -274,3 +274,83 @@ class TestFilesLsRecursive:
         depths = [item["_depth"] for item in data]
         assert 0 in depths
         assert 1 in depths
+
+
+# ---------------------------------------------------------------------------
+# URI output mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("_files_env")
+class TestFilesLsUri:
+    def test_uri_flat(self, httpx_mock, runner: CliRunner) -> None:
+        httpx_mock.add_response(
+            url="https://cloud.example.com/api/v4/file?uri=cloudreve%3A%2F%2Fmy%2F&page=0&page_size=50&order_by=name&order_direction=asc",
+            json=_listing_response(SAMPLE_FILES),
+        )
+
+        result = runner.invoke(cli, ["files", "ls", "--uri"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert len(lines) == 3
+        assert "cloudreve://my/Documents" in lines
+        assert "cloudreve://my/photo.jpg" in lines
+        assert "cloudreve://my/notes.txt" in lines
+
+    def test_uri_recursive(self, httpx_mock, runner: CliRunner) -> None:
+        root_files = [
+            {
+                "type": 1,
+                "id": "d1",
+                "name": "subdir",
+                "size": 0,
+                "path": "cloudreve://my/subdir",
+            },
+            {
+                "type": 0,
+                "id": "f1",
+                "name": "root.txt",
+                "size": 100,
+                "path": "cloudreve://my/root.txt",
+            },
+        ]
+        sub_files = [
+            {
+                "type": 0,
+                "id": "f2",
+                "name": "child.txt",
+                "size": 200,
+                "path": "cloudreve://my/subdir/child.txt",
+            },
+        ]
+
+        httpx_mock.add_response(
+            url="https://cloud.example.com/api/v4/file?uri=cloudreve%3A%2F%2Fmy%2F&page=0&page_size=50&order_by=name&order_direction=asc",
+            json=_listing_response(root_files),
+        )
+        httpx_mock.add_response(
+            url="https://cloud.example.com/api/v4/file?uri=cloudreve%3A%2F%2Fmy%2Fsubdir&page=0&page_size=50&order_by=name&order_direction=asc",
+            json=_listing_response(sub_files),
+        )
+
+        result = runner.invoke(cli, ["files", "ls", "--recursive", "--uri"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert len(lines) == 3
+        assert "cloudreve://my/subdir" in lines
+        assert "cloudreve://my/subdir/child.txt" in lines
+        assert "cloudreve://my/root.txt" in lines
+
+    def test_uri_outputs_to_stdout_only(self, httpx_mock, runner: CliRunner) -> None:
+        """URI mode should write only to stdout, nothing to stderr."""
+        httpx_mock.add_response(
+            url="https://cloud.example.com/api/v4/file?uri=cloudreve%3A%2F%2Fmy%2F&page=0&page_size=50&order_by=name&order_direction=asc",
+            json=_listing_response(SAMPLE_FILES),
+        )
+
+        result = runner.invoke(cli, ["files", "ls", "--uri"])
+        assert result.exit_code == 0
+        assert result.output.strip()  # stdout has content
+        # Each line is a valid URI
+        for line in result.output.strip().splitlines():
+            assert line.startswith("cloudreve://")
