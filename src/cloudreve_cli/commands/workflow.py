@@ -1,7 +1,8 @@
-"""Workflow commands — task listing and progress monitoring."""
+"""Workflow commands — task listing, progress monitoring, and management."""
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import click
@@ -200,3 +201,235 @@ def progress(state: GlobalState, task_id: str) -> None:
         )
 
     render_table(rows, columns=["Phase", "Progress", "Detail"], title=f"Task {task_id}")
+
+
+# ---------------------------------------------------------------------------
+# shared helpers for task creation commands
+# ---------------------------------------------------------------------------
+
+
+def _render_task(state: GlobalState, task: dict[str, Any], *, label: str = "Task") -> None:
+    """Render a single task response in json or table mode."""
+    if state.output == "json":
+        render_json(task)
+        return
+
+    parsed = WorkflowTask.model_validate(task)
+    rows = [_task_to_row(parsed)]
+    render_table(rows, columns=["ID", "Type", "Status", "Duration", "Error", "Created"])
+    echo(f"{label} created: {parsed.id}", quiet=state.quiet)
+
+
+def _wait_for_task(
+    client: Any,
+    task_id: str,
+    *,
+    state: GlobalState,
+    interval: float = 2.0,
+    max_wait: float = 3600.0,
+) -> None:
+    """Poll task progress until it completes or errors out."""
+    echo(f"Waiting for task {task_id} ...", quiet=state.quiet)
+    start = time.monotonic()
+
+    while time.monotonic() - start < max_wait:
+        time.sleep(interval)
+        tasks = _fetch_all_tasks(client, page_size=50)
+        task = next((t for t in tasks if t.id == task_id), None)
+        if task is None:
+            echo(f"Task {task_id} not found.", quiet=state.quiet)
+            return
+        if task.status in ("completed", "error"):
+            if task.status == "error":
+                echo(f"Task {task_id} failed: {task.error}", quiet=state.quiet)
+            else:
+                echo(f"Task {task_id} completed.", quiet=state.quiet)
+            return
+        # Still running — show brief status
+        echo(f"  status={task.status}", quiet=state.quiet)
+
+    echo(f"Timed out waiting for task {task_id}.", quiet=state.quiet)
+
+
+# ---------------------------------------------------------------------------
+# relocate command
+# ---------------------------------------------------------------------------
+
+
+@workflow.command()
+@click.argument("files", nargs=-1, required=True)
+@click.option("--policy", required=True, help="Destination storage policy ID.")
+@click.option("--wait", "wait_flag", is_flag=True, help="Poll until task completes.")
+@pass_state
+def relocate(state: GlobalState, files: tuple[str, ...], policy: str, wait_flag: bool) -> None:
+    """Relocate files to a different storage policy.
+
+    FILES are one or more cloudreve:// URIs (or bare paths like /photos).
+    """
+    from cloudreve_cli.utils.uri import parse_uri
+
+    src_uris = [parse_uri(f).to_uri() for f in files]
+    payload: dict[str, Any] = {"src": src_uris, "dst_policy_id": policy}
+
+    client = state.make_client()
+    with client:
+        # NOTE: the endpoint path has a known typo in the Cloudreve API
+        data = client.post("/api/v4/workflow/reloacte", json=payload)
+        _render_task(state, data)
+
+        if wait_flag and isinstance(data, dict) and data.get("id"):
+            _wait_for_task(client, data["id"], state=state)
+
+
+# ---------------------------------------------------------------------------
+# import command
+# ---------------------------------------------------------------------------
+
+
+@workflow.command(name="import")
+@click.option("--server-path", required=True, help="Absolute path on the server filesystem.")
+@click.option("--dest", required=True, help="Destination cloudreve:// URI (or bare path).")
+@click.option("--user-id", required=True, help="Target user hash ID.")
+@click.option("--policy-id", required=True, type=int, help="Storage policy ID (numeric).")
+@click.option("--recursive", is_flag=True, help="Import recursively.")
+@click.option("--extract-media-meta", is_flag=True, help="Extract media metadata.")
+@click.option("--wait", "wait_flag", is_flag=True, help="Poll until task completes.")
+@pass_state
+def import_cmd(
+    state: GlobalState,
+    server_path: str,
+    dest: str,
+    user_id: str,
+    policy_id: int,
+    recursive: bool,
+    extract_media_meta: bool,
+    wait_flag: bool,
+) -> None:
+    """Import files from the server filesystem (admin-only)."""
+    from cloudreve_cli.utils.uri import parse_uri
+
+    dst_uri = parse_uri(dest).to_uri()
+    payload: dict[str, Any] = {
+        "src": server_path,
+        "dst": dst_uri,
+        "user_id": user_id,
+        "policy_id": policy_id,
+        "recursive": recursive,
+        "extract_media_meta": extract_media_meta,
+    }
+
+    client = state.make_client()
+    with client:
+        data = client.post("/api/v4/workflow/import", json=payload)
+        _render_task(state, data)
+
+        if wait_flag and isinstance(data, dict) and data.get("id"):
+            _wait_for_task(client, data["id"], state=state)
+
+
+# ---------------------------------------------------------------------------
+# download subgroup
+# ---------------------------------------------------------------------------
+
+
+@workflow.group()
+def download() -> None:
+    """Remote download management."""
+
+
+@download.command()
+@click.option(
+    "--url",
+    "urls",
+    multiple=True,
+    help="Download URL (repeatable). Mutually exclusive with --src-file.",
+)
+@click.option(
+    "--src-file",
+    default=None,
+    help="cloudreve:// URI to a file containing URLs (one per line).",
+)
+@click.option("--dest", required=True, help="Destination cloudreve:// URI (or bare path).")
+@click.option("--wait", "wait_flag", is_flag=True, help="Poll until task completes.")
+@pass_state
+def create(
+    state: GlobalState,
+    urls: tuple[str, ...],
+    src_file: str | None,
+    dest: str,
+    wait_flag: bool,
+) -> None:
+    """Create a remote download task."""
+    from cloudreve_cli.utils.uri import parse_uri
+
+    if not urls and not src_file:
+        raise click.UsageError("Provide at least one --url or --src-file.")
+    if urls and src_file:
+        raise click.UsageError("--url and --src-file are mutually exclusive.")
+
+    dst_uri = parse_uri(dest).to_uri()
+    payload: dict[str, Any] = {"dst": dst_uri}
+
+    if urls:
+        payload["src"] = list(urls)
+    else:
+        payload["src_file"] = parse_uri(src_file).to_uri()  # type: ignore[arg-type]
+
+    client = state.make_client()
+    with client:
+        data = client.post("/api/v4/workflow/download", json=payload)
+
+        # API returns an array of task objects
+        if state.output == "json":
+            render_json(data)
+        elif isinstance(data, list):
+            for task_data in data:
+                _render_task(state, task_data)
+        else:
+            _render_task(state, data)
+
+        if wait_flag and isinstance(data, list):
+            for task_data in data:
+                if isinstance(task_data, dict) and task_data.get("id"):
+                    _wait_for_task(client, task_data["id"], state=state)
+
+
+@download.command()
+@click.argument("task_id")
+@click.option(
+    "--files",
+    required=True,
+    help="Comma-separated list of file indices to download (0-based).",
+)
+@pass_state
+def select(state: GlobalState, task_id: str, files: str) -> None:
+    """Select specific files from a remote download task."""
+    file_indices = [int(idx.strip()) for idx in files.split(",")]
+    file_args = [{"index": idx} for idx in file_indices]
+    payload: dict[str, Any] = {"files": file_args}
+
+    client = state.make_client()
+    with client:
+        data = client.patch(f"/api/v4/workflow/download/{task_id}", json=payload)
+
+        if state.output == "json":
+            render_json(data)
+            return
+
+        echo(f"Files selected for task {task_id}.", quiet=state.quiet)
+
+
+@download.command()
+@click.argument("task_id")
+@pass_state
+def cancel(state: GlobalState, task_id: str) -> None:
+    """Cancel a remote download task."""
+    client = state.make_client()
+    with client:
+        data = client.delete(f"/api/v4/workflow/download/{task_id}")
+
+        if state.output == "json":
+            render_json(data)
+            return
+
+        echo(f"Task {task_id} cancelled.", quiet=state.quiet)
