@@ -372,10 +372,6 @@ class TestWorkflowImport:
             "/data/uploads",
             "--dest",
             "/imported",
-            "--user-id",
-            "usr123",
-            "--policy-id",
-            "5",
         )
         assert result.exit_code == 0
         parsed = json.loads(result.output)
@@ -383,8 +379,8 @@ class TestWorkflowImport:
         req = httpx_mock.get_request()
         body = json.loads(req.content)
         assert body["src"] == "/data/uploads"
-        assert body["policy_id"] == 5
-        assert body["user_id"] == "usr123"
+        assert "user_id" not in body
+        assert "policy_id" not in body
         assert body["recursive"] is False
 
     def test_import_table(self, httpx_mock, _clean_env):
@@ -398,10 +394,6 @@ class TestWorkflowImport:
             "/srv",
             "--dest",
             "/dest",
-            "--user-id",
-            "u1",
-            "--policy-id",
-            "1",
         )
         assert result.exit_code == 0
         assert "task-aaa" in result.output
@@ -417,10 +409,6 @@ class TestWorkflowImport:
             "/srv",
             "--dest",
             "/dest",
-            "--user-id",
-            "u1",
-            "--policy-id",
-            "1",
             "--recursive",
         )
         assert result.exit_code == 0
@@ -438,10 +426,6 @@ class TestWorkflowImport:
             "/srv",
             "--dest",
             "/dest",
-            "--user-id",
-            "u1",
-            "--policy-id",
-            "1",
             "--extract-media-meta",
         )
         assert result.exit_code == 0
@@ -459,13 +443,146 @@ class TestWorkflowImport:
             "/srv",
             "--dest",
             "/dest",
-            "--user-id",
-            "u1",
-            "--policy-id",
-            "1",
         )
         req = httpx_mock.get_request()
         assert "/workflow/import" in str(req.url)
+
+    def test_import_with_user_id_and_policy_id(self, httpx_mock, _clean_env):
+        """When explicit --user-id / --policy-id are given, they appear in the payload."""
+        httpx_mock.add_response(json=_task_response(TASK_A))
+        result = _invoke(
+            "--output",
+            "json",
+            "workflow",
+            "import",
+            "--server-path",
+            "/srv",
+            "--dest",
+            "/dest",
+            "--user-id",
+            "usr42",
+            "--policy-id",
+            "7",
+        )
+        assert result.exit_code == 0
+        body = json.loads(httpx_mock.get_request().content)
+        assert body["user_id"] == "usr42"
+        assert body["policy_id"] == 7
+
+
+# ---------------------------------------------------------------------------
+# --wait polling (_wait_for_task)
+# ---------------------------------------------------------------------------
+
+
+class TestWaitForTask:
+    """Test the --wait flag polling logic via ``workflow relocate --wait``."""
+
+    def _relocate_wait(self, httpx_mock, monkeypatch, poll_responses):
+        """Helper: invoke relocate --wait with mocked time and poll responses.
+
+        ``poll_responses`` is a list of task-list JSON dicts that will be
+        returned on successive polling GETs *after* the initial POST.
+        """
+        # First response is the POST /workflow/reloacte returning a task
+        httpx_mock.add_response(json=_task_response(TASK_A))
+        # Subsequent GETs return poll_responses in order
+        for resp in poll_responses:
+            httpx_mock.add_response(json=resp)
+
+        # Make time.sleep a no-op so tests don't actually wait
+        monkeypatch.setattr("cloudreve_cli.commands.workflow.time.sleep", lambda _: None)
+
+        # Make time.monotonic advance by 1 second per call (far below timeout)
+        counter = {"n": 0}
+
+        def fake_monotonic():
+            counter["n"] += 1
+            return float(counter["n"])
+
+        monkeypatch.setattr("cloudreve_cli.commands.workflow.time.monotonic", fake_monotonic)
+
+        return _invoke(
+            "workflow",
+            "relocate",
+            "/file.txt",
+            "--policy",
+            "P1",
+            "--wait",
+        )
+
+    def test_wait_completed(self, httpx_mock, _clean_env, monkeypatch):
+        completed_task = {**TASK_A, "status": "completed"}
+        result = self._relocate_wait(
+            httpx_mock, monkeypatch, [_workflow_list_response([completed_task])]
+        )
+        assert result.exit_code == 0
+        assert "completed" in result.output.lower()
+
+    def test_wait_error(self, httpx_mock, _clean_env, monkeypatch):
+        error_task = {**TASK_A, "status": "error", "error": "disk full"}
+        result = self._relocate_wait(
+            httpx_mock, monkeypatch, [_workflow_list_response([error_task])]
+        )
+        assert result.exit_code == 0
+        assert "failed" in result.output.lower()
+        assert "disk full" in result.output.lower()
+
+    def test_wait_not_found(self, httpx_mock, _clean_env, monkeypatch):
+        # Polling returns an empty task list — task disappeared
+        result = self._relocate_wait(httpx_mock, monkeypatch, [_workflow_list_response([])])
+        assert result.exit_code == 0
+        assert "not found" in result.output.lower()
+
+    def test_wait_timeout(self, httpx_mock, _clean_env, monkeypatch):
+        """If the task stays queued and monotonic exceeds max_wait, we time out."""
+        running_task = {**TASK_A, "status": "queued"}
+
+        # First response: POST creating the task
+        httpx_mock.add_response(json=_task_response(TASK_A))
+        # One polling GET (task stays queued, then loop exits on timeout)
+        httpx_mock.add_response(json=_workflow_list_response([running_task]))
+
+        # Wall-clock mock: sleep() jumps past max_wait so timeout triggers
+        # after exactly one poll iteration.  monotonic() returns the clock
+        # value; client.request() also calls monotonic() for timing but that
+        # just sees the same stable value and doesn't advance the clock.
+        _clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return _clock["t"]
+
+        def fake_sleep(_seconds):
+            _clock["t"] += 4000.0  # jump past 3600s max_wait
+
+        monkeypatch.setattr("cloudreve_cli.commands.workflow.time.sleep", fake_sleep)
+        monkeypatch.setattr("cloudreve_cli.commands.workflow.time.monotonic", fake_monotonic)
+
+        result = _invoke(
+            "workflow",
+            "relocate",
+            "/file.txt",
+            "--policy",
+            "P1",
+            "--wait",
+        )
+        assert result.exit_code == 0
+        assert "timed out" in result.output.lower()
+
+    def test_wait_polls_then_completes(self, httpx_mock, _clean_env, monkeypatch):
+        """Task is running on first poll, then completes on second poll."""
+        running_task = {**TASK_A, "status": "processing"}
+        completed_task = {**TASK_A, "status": "completed"}
+        result = self._relocate_wait(
+            httpx_mock,
+            monkeypatch,
+            [
+                _workflow_list_response([running_task]),
+                _workflow_list_response([completed_task]),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "completed" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------

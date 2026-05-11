@@ -6,14 +6,15 @@ from cloudreve_cli.config import resolve_config
 
 
 class TestEnvVarResolution:
-    """Both CLOUDREVE_SERVER and CLOUDREVE_TOKEN must be set for env source."""
+    """CLOUDREVE_SERVER alone is enough; token is optional (for unauth endpoints)."""
 
-    def test_env_server_alone_ignored(self, monkeypatch, _clean_env):
-        """Setting only CLOUDREVE_SERVER does NOT activate env source."""
+    def test_env_server_alone_activates_env(self, monkeypatch, _clean_env):
+        """Setting only CLOUDREVE_SERVER activates env source (token is None)."""
         monkeypatch.setenv("CLOUDREVE_SERVER", "https://env.example.com")
         cfg = resolve_config()
-        # Falls through to profile/none — server-only env is not enough
-        assert cfg.source != "env"
+        assert cfg.source == "env"
+        assert cfg.server == "https://env.example.com"
+        assert cfg.token is None
 
     def test_env_token_alone_ignored(self, monkeypatch, _clean_env):
         """Setting only CLOUDREVE_TOKEN does NOT activate env source."""

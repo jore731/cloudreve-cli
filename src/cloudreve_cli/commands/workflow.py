@@ -315,8 +315,10 @@ def relocate(
 @workflow.command(name="import")
 @click.option("--server-path", required=True, help="Absolute path on the server filesystem.")
 @click.option("--dest", required=True, help="Destination cloudreve:// URI (or bare path).")
-@click.option("--user-id", required=True, help="Target user hash ID.")
-@click.option("--policy-id", required=True, type=int, help="Storage policy ID (numeric).")
+@click.option("--user-id", default=None, help="Target user hash ID (default: authenticated user).")
+@click.option(
+    "--policy-id", default=None, type=int, help="Storage policy ID (default: user policy)."
+)
 @click.option("--recursive", is_flag=True, help="Import recursively.")
 @click.option("--extract-media-meta", is_flag=True, help="Extract media metadata.")
 @click.option("--wait", "wait_flag", is_flag=True, help="Poll until task completes.")
@@ -325,8 +327,8 @@ def import_cmd(
     state: GlobalState,
     server_path: str,
     dest: str,
-    user_id: str,
-    policy_id: int,
+    user_id: str | None,
+    policy_id: int | None,
     recursive: bool,
     extract_media_meta: bool,
     wait_flag: bool,
@@ -338,11 +340,13 @@ def import_cmd(
     payload: dict[str, Any] = {
         "src": server_path,
         "dst": dst_uri,
-        "user_id": user_id,
-        "policy_id": policy_id,
         "recursive": recursive,
         "extract_media_meta": extract_media_meta,
     }
+    if user_id is not None:
+        payload["user_id"] = user_id
+    if policy_id is not None:
+        payload["policy_id"] = policy_id
 
     client = state.make_client()
     with client:

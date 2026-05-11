@@ -47,10 +47,10 @@ def resolve_config(
             source="cli",
         )
 
-    # 2. Both env vars must be set to activate env-based auth
+    # 2. Env vars - server alone is enough for unauthenticated endpoints
     env_server = os.environ.get(ENV_SERVER)
     env_token = os.environ.get(ENV_TOKEN)
-    if env_server and env_token:
+    if env_server:
         return ResolvedConfig(
             server=env_server,
             token=env_token,
